@@ -4,9 +4,10 @@ module Amber.Syntax.Equivalence (
     ) where
 
 import Control.Monad
-import Control.Monad.Reader
+import Polysemy.Reader hiding (Local)
 
 import Amber.Util.Misc
+import Amber.Util.Polysemy
 import Amber.Util.PartIso (PartIso)
 import qualified Amber.Util.PartIso as PartIso
 import Amber.Syntax.Abstract
@@ -14,7 +15,7 @@ import Amber.Syntax.Abstract
 type AlphaConv = PartIso Name Name
 
 class Equiv a where
-    equiv :: MonadReader AlphaConv m => a -> a -> m Bool
+    equiv :: a -> a -> Eff '[Reader AlphaConv] Bool
 
 instance Equiv Name where
     equiv x y = asks $ PartIso.member x y

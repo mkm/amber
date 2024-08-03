@@ -6,47 +6,50 @@ import Prelude hiding (exp)
 import Control.Lens
 import Control.Applicative
 import Control.Monad
-import Control.Monad.Reader
-import Control.Monad.Writer
-import Control.Monad.Except
+import Polysemy
+import Polysemy.Reader
+import Polysemy.Writer
+import Polysemy.Fail
+import Polysemy.NonDet
 
+import Amber.Util.Polysemy
 import Amber.Syntax.Abstract
 import Amber.Syntax.Subst
 import Amber.Typing.Context
 
-type Norm = ReaderT GlobalEnv
-type Match m = WriterT LocalEnv (ExceptT () (Norm m))
+-- type Norm = ReaderT GlobalEnv
+-- type Match m = WriterT LocalEnv (ExceptT () (Norm m))
 
-expNormalForm :: Monad m => GlobalEnv -> Exp -> m Exp
-expNormalForm env e = expNF e `runReaderT` env
+expNormalForm :: Exp -> Eff '[Reader GlobalEnv] Exp
+expNormalForm = expNF
 
-expNF :: Monad m => Exp -> Norm m Exp
+expNF :: Exp -> Eff '[Reader GlobalEnv] Exp
 expNF (AppE h@(GlobalRec x) es) = do
     es' <- traverse expNF es
-    eqs <- view $ recDefs . at x . _Just . recStatus . _RecDefined
-    matches <- runExceptT . asum $ map (matchEquation es') eqs
+    eqs <- asks . view $ recDefs . at x . _Just . recStatus . _RecDefined
+    matches <- runNonDet . asum $ map (failToNonDet . matchEquation es') eqs
     case matches of
-        Left () -> pure $ AppE h es'
-        Right e' -> expNF e'
+        [] -> pure $ AppE h es'
+        [e'] -> expNF e'
 expNF (AppE h es) = AppE h <$> traverse expNF es
 expNF e@UnivE = pure e
 expNF (FunE x ty1 ty2) = FunE x <$> expNF ty1 <*> expNF ty2
 
-matchEquation :: Monad m => [Exp] -> Equation -> ExceptT () (Norm m) Exp
+matchEquation :: [Exp] -> Equation -> Eff [Reader GlobalEnv, Fail] Exp
 matchEquation es (Equation p e) = do
-    (es', env) <- runWriterT $ matchPat es p
+    (env, es') <- runWriter $ matchPat es p
     pure $ app (subst (env ^. bindings) e) es'
 
-matchPat :: Monad m => [Exp] -> Pat -> Match m [Exp]
+matchPat :: [Exp] -> Pat -> Eff [Reader GlobalEnv, Fail, Writer LocalEnv] [Exp]
 matchPat es SubjectP = pure es
-matchPat es (AppP p1 p2) =
-    matchPat es p1 >>= \case
-        [] -> throwError ()
-        (e0 : es') -> matchSubPat e0 p2 >> pure es'
+matchPat es (AppP p1 p2) = do
+    (e0 : es') <- matchPat es p1
+    matchSubPat e0 p2
+    pure es'
 
-matchSubPat :: Monad m => Exp -> SubPat -> Match m ()
+matchSubPat :: Exp -> SubPat -> Eff [Reader GlobalEnv, Fail, Writer LocalEnv] ()
 matchSubPat e (VarP x) = tell $ mempty & bindings . at x ?~ e
 matchSubPat (AppE (Con ident') es) (ConP ident ps)
     | ident' == ident && length es == length ps = void $ zipWithM matchSubPat es ps
 matchSubPat _ (ForcedP _) = pure ()
-matchSubPat _ _ = throwError ()
+matchSubPat _ _ = fail ""

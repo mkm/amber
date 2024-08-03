@@ -9,10 +9,6 @@ module Amber.Syntax.Name (
         newName,
     ) where
 
-import Control.Monad.Identity
-import Control.Monad.Reader
-import Control.Monad.Except
-import Control.Monad.Fix
 import Polysemy
 import Polysemy.State
 import Data.Text (Text)
@@ -33,8 +29,6 @@ instance Semigroup Index where
 
 instance Monoid Index where
     mempty = Index 0
-
-type NameGenT = IdentityT
 
 data NameGen m a where
     NewName :: Text -> NameGen m Name

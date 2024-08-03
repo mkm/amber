@@ -1,12 +1,12 @@
 module Amber.Typing.Unify (
         Unify(..),
-        unifyWith,
     ) where
 
-import Control.Monad.Reader
-import Control.Monad.Except
+import Polysemy.Reader hiding (Local)
+import Polysemy.Error
 import Data.Text (Text)
 
+import Amber.Util.Polysemy
 import Amber.Util.PartIso (PartIso)
 import qualified Amber.Util.PartIso as PartIso
 import Amber.Syntax.Abstract
@@ -20,15 +20,12 @@ data UnifyError a = UnifyError a a
 type UnifyError = ()
 
 class Unify a where
-    unify :: Monad m => a -> a -> ReaderT AlphaConv (ExceptT UnifyError m) ()
+    unify :: a -> a -> Eff '[Reader AlphaConv, Error UnifyError] ()
 
-    default unify :: (Eq a, Monad m) => a -> a -> ReaderT AlphaConv (ExceptT UnifyError m) ()
+    default unify :: Eq a => a -> a -> Eff '[Reader AlphaConv, Error UnifyError] ()
     unify x y
         | x == y = pure ()
         | otherwise = different x y
-
-unifyWith :: (MonadError e m, Unify a) => (UnifyError -> e) -> AlphaConv -> a -> a -> m ()
-unifyWith f conv x y = modifyError f $ unify x y `runReaderT` conv
 
 instance Unify Text where
 
@@ -59,5 +56,5 @@ instance Unify Exp where
         local (PartIso.insert x x') $ unify e2 e2'
     unify e e' = different e e'
 
-different :: Monad m => a -> a -> ReaderT AlphaConv (ExceptT UnifyError m) b
-different _ _ = throwError ()
+different :: a -> a -> Eff '[Error UnifyError] ()
+different _ _ = throw ()

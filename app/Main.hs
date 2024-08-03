@@ -1,11 +1,10 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, TypeApplications #-}
 module Main where
 
-import Control.Monad.Identity
-import Control.Monad.Except
 import Polysemy
 import Polysemy.Reader
 import Polysemy.Error
+import Polysemy.Fixpoint
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
@@ -26,53 +25,36 @@ main = do
     mod <- case parseModule source input of
         Left err -> print err >> exitFailure
         Right mod -> pure mod
-    let mod' = runIdentity $ resolveModule mod
-    printModule mod' >>= T.putStr
-    checkResult <- runExceptT (checkModule mod')
+    let mod' = run $ resolveModule mod
+    T.putStr $ printModule mod'
+    let checkResult = run . runError $ checkModule mod'
     case checkResult of
-        Left err -> printError err >>= T.putStrLn
+        Left err -> T.putStrLn $ printError err
         Right env ->
             case run . runError . runReader env $ coverageCheckModule mod' of
-                Left err -> printCoverageError err >>= T.putStrLn
+                Left err -> T.putStrLn $ printCoverageError err
                 Right () -> putStrLn "OK"
 
-printError :: Monad m => TypeError -> m Text
-printError (ExpUnifyError e1 e2) = do
-    s1 <- printExp e1
-    s2 <- printExp e2
-    pure $ s1 <> " ≠ " <> s2
-printError (NotUnivError e) = do
-    s <- printExp e
-    pure $ s <> " is not a universe"
-printError (InEquation ident eq err) = do
-    sErr <- printError err
-    sEq <- printEquation ident eq
-    pure $ sErr <> "\n  while checking equation\n" <> sEq
-printError (InPat ident p err) = do
-    sErr <- printError err
-    sP <- printPat ident p
-    pure $ sErr <> "\n  while checking pattern\n" <> sP
-printError (InExp e err) = do
-    sErr <- printError err
-    sE <- printExp e
-    pure $ sErr <> "\n  while checking expression\n" <> sE
-printError (InExpAt ty e err) = do
-    sErr <- printError err
-    sTy <- printExp ty
-    sE <- printExp e
-    pure $ sErr <> "\n  while checking expression\n" <> sE <> " : " <> sTy
-printError (InExpApp ty es err) = do
-    sErr <- printError err
-    sTy <- printExp ty
-    sEs <- traverse printExp es
-    pure $ sErr <> "\n  while checking application\n(_ : " <> sTy <> ")" <> mconcat ["\n    " <> sE | sE <- sEs]
-printError (InHead h err) = do
-    sErr <- printError err
-    sH <- printHead h
-    pure $ sErr <> "\n  while checking head expression\n" <> sH
-printError err = pure . T.pack $ show err
+printError :: TypeError -> Text
+printError (ExpUnifyError e1 e2) =
+    printExp e1 <> " ≠ " <> printExp e2
+printError (NotUnivError e) =
+    printExp e <> " is not a universe"
+printError (InEquation ident eq err) =
+    printError err <> "\n  while checking equation\n" <> printEquation ident eq
+printError (InPat ident p err) =
+    printError err <> "\n  while checking pattern\n" <> printPat ident p
+printError (InExp e err) =
+    printError err <> "\n  while checking expression\n" <> printExp e
+printError (InExpAt ty e err) =
+    printError err <> "\n  while checking expression\n" <> printExp e <> " : " <> printExp ty
+printError (InExpApp ty es err) =
+    printError err <> "\n  while checking application\n(_ : " <> printExp ty <> ")" <> mconcat ["\n    " <> printExp e | e <- es]
+printError (InHead h err) =
+    printError err <> "\n  while checking head expression\n" <> printHead h
+printError err =
+    T.pack $ show err
 
-printCoverageError :: Monad m => CoverageError -> m Text
-printCoverageError (MissingPatternsError ident ps) = do
-    sPs <- traverse (printPat ident) ps
-    pure $ ident <> " does not cover all cases" <> mconcat ["\n" <> sP | sP <- sPs]
+printCoverageError :: CoverageError -> Text
+printCoverageError (MissingPatternsError ident ps) =
+    ident <> " does not cover all cases" <> mconcat ["\n" <> printPat ident p | p <- ps]

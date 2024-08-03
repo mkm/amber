@@ -78,6 +78,7 @@ library
                         Amber.Util.From,
                         Amber.Util.Misc,
                         Amber.Util.PartIso,
+                        Amber.Util.Polysemy,
                         Amber.Util.Reader,
 
     default-extensions: GeneralizedNewtypeDeriving,

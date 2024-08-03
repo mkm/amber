@@ -10,18 +10,20 @@ module Amber.Syntax.Printer (
 import Prelude hiding (exp, head)
 import Control.Lens hiding (Context)
 import Control.Monad
-import Control.Monad.Reader
-import Control.Monad.Writer
+import Polysemy
+import Polysemy.Reader hiding (Local)
+import Polysemy.Writer
 import Data.Foldable
 import Data.Text (Text)
 import Data.Set (Set)
 import qualified Data.Set as S
 
+import Amber.Util.Polysemy
 import qualified Amber.Util.PartIso as PartIso
 import Amber.Syntax.Abstract
 import Amber.Analysis.Occurrence
 
-type Print m = ReaderT Context (WriterT Text m)
+type Print a = Eff '[Reader Context, Writer Text] a
 
 data Context =
     Context {
@@ -34,37 +36,37 @@ data Prec = TopPrec | AppPrec | BotPrec
 
 makeLenses ''Context
 
-printModule :: Monad m => Module -> m Text
-printModule mod = execWriterT $ module' mod `runReaderT` emptyContext
+printModule :: Module -> Text
+printModule mod = fst . run . runWriter . runReader emptyContext $ module' mod
 
-printEquation :: Monad m => Text -> Equation -> m Text
-printEquation ident eq = execWriterT $ equation ident eq `runReaderT` emptyContext
+printEquation :: Text -> Equation -> Text
+printEquation ident eq = fst . run . runWriter . runReader emptyContext $ equation ident eq
 
-printPat :: Monad m => Text -> Pat -> m Text
-printPat ident p = execWriterT $ pat ident p `runReaderT` emptyContext
+printPat :: Text -> Pat -> Text
+printPat ident p = fst . run . runWriter . runReader emptyContext $ pat ident p
 
-printExp :: Monad m => Exp -> m Text
-printExp e = execWriterT $ exp e `runReaderT` emptyContext
+printExp :: Exp -> Text
+printExp e = fst . run . runWriter . runReader emptyContext $ exp e
 
-printHead :: Monad m => Head -> m Text
-printHead h = execWriterT $ head h `runReaderT` emptyContext
+printHead :: Head -> Text
+printHead h = fst . run . runWriter . runReader emptyContext $ head h
 
 emptyContext :: Context
 emptyContext = Context { _prec = TopPrec, _vars = S.empty }
 
-module' :: Monad m => Module -> Print m ()
+module' :: Module -> Print ()
 module' = mapM_ directive
 
-directive :: Monad m => Directive -> Print m ()
+directive :: Directive -> Print ()
 directive (RecDec ident ty) = do
-    tell ident
+    emit ident
     colon
     exp ty
     newline
     newline
 directive (IndDec ident ty) = do
-    tell "inductive "
-    tell ident
+    emit "inductive "
+    emit ident
     colon
     exp ty
     newline
@@ -76,84 +78,87 @@ directive (IndDef _ cons) = do
     traverse_ constructor cons
     newline
 
-equation :: Monad m => Text -> Equation -> Print m ()
+equation :: Text -> Equation -> Print ()
 equation ident (Equation p e) = do
     pat ident p
     equal
     exp e
     newline
 
-constructor :: Monad m => Constructor -> Print m ()
+constructor :: Constructor -> Print ()
 constructor (Constructor ident ty) = do
-    tell "con "
-    tell ident
+    emit "con "
+    emit ident
     colon
     exp ty
     newline
 
-pat :: Monad m => Text -> Pat -> Print m ()
-pat ident SubjectP = tell ident
+pat :: Text -> Pat -> Print ()
+pat ident SubjectP = emit ident
 pat ident (AppP p1 p2) = parens AppPrec $ do
     withPrec (pred AppPrec) $ pat ident p1
-    tell " "
+    emit " "
     withPrec AppPrec $ subPat p2
 
-subPat :: Monad m => SubPat -> Print m ()
+subPat :: SubPat -> Print ()
 subPat (VarP x) = name x
-subPat (ConP ident []) = tell ident
+subPat (ConP ident []) = emit ident
 subPat (ConP ident ps) = parens AppPrec do
-    tell ident
+    emit ident
     withPrec AppPrec . forM_ ps $ \p -> do
-        tell " "
+        emit " "
         subPat p
 subPat (ForcedP e) = do
-    tell "!"
+    emit "!"
     withPrec BotPrec $ exp e
 
-exp :: Monad m => Exp -> Print m ()
+exp :: Exp -> Print ()
 exp (AppE h []) = head h
 exp (AppE h es) = parens AppPrec do
     withPrec (pred AppPrec) $ head h
     withPrec AppPrec . forM_ es $ \e -> do
-        tell " "
+        emit " "
         exp e
-exp UnivE = tell "Type"
+exp UnivE = emit "Type"
 exp (FunE x e1 e2) = do
-    tell "["
-    conv <- PartIso.diagonal . S.insert x <$> view vars
+    emit "["
+    conv <- PartIso.diagonal . S.insert x <$> asks (view vars)
     when (occursIn conv x e2) $ do
         name x
         colon
     exp e1
-    tell "] "
+    emit "] "
     local (vars %~ S.insert x) $ exp e2
 
-head :: Monad m => Head -> Print m ()
+head :: Head -> Print ()
 head (Local x) = name x
-head (Con ident) = tell ident
-head (GlobalRec ident) = tell ident
-head (GlobalInd ident) = tell ident
+head (Con ident) = emit ident
+head (GlobalRec ident) = emit ident
+head (GlobalInd ident) = emit ident
 
-name :: Monad m => Name -> Print m ()
-name = tell . uniqueName
+name :: Name -> Print ()
+name = emit . uniqueName
 
-parens :: Monad m => Prec -> Print m () -> Print m ()
+parens :: Prec -> Print () -> Print ()
 parens p m = do
-    reqPrec <- view prec
+    reqPrec <- asks $ view prec
     if reqPrec >= p then withPrec TopPrec $ do
-        tell "("
+        emit "("
         m
-        tell ")"
+        emit ")"
     else m
 
-withPrec :: Monad m => Prec -> Print m () -> Print m ()
+withPrec :: Prec -> Member (Reader Context) r => Sem r a -> Sem r a
 withPrec p = local $ prec .~ p
 
-colon :: Monad m => Print m ()
-colon = tell " : "
+colon :: Print ()
+colon = emit " : "
 
-equal :: Monad m => Print m ()
-equal = tell " = "
+equal :: Print ()
+equal = emit " = "
 
-newline :: Monad m => Print m ()
-newline = tell "\n"
+newline :: Print ()
+newline = emit "\n"
+
+emit :: Text -> Print ()
+emit = tell

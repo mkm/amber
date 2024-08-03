@@ -7,18 +7,16 @@ module Amber.Typing.Check (
 import Prelude hiding (exp, head)
 import Control.Lens
 import Control.Monad
-import Control.Monad.Reader
-import Control.Monad.Writer
-import Control.Monad.State
-import Control.Monad.Except
 import Polysemy
-import qualified Polysemy.Reader as PR
-import qualified Polysemy.Error as PE
+import Polysemy.Reader hiding (Local)
+import Polysemy.Writer
+import Polysemy.State
+import Polysemy.Error
 import Data.Foldable
-import Data.Monoid
 import Data.Text (Text)
 import qualified Data.Map as M
 
+import Amber.Util.Polysemy
 import qualified Amber.Util.PartIso as PartIso
 import Amber.Syntax.Abstract
 import Amber.Syntax.Subst
@@ -26,9 +24,16 @@ import Amber.Typing.Context
 import Amber.Typing.Unify
 import Amber.Typing.Normalise
 
+{-
 type Check m = StateT GlobalEnv (ExceptT TypeError m)
 type CheckPat m = StateT LocalEnv (WriterT (Ap (CheckExp m) ()) (Check m))
 type CheckExp m = ReaderT LocalEnv (Check m)
+-}
+type Check a = Eff '[State GlobalEnv, Error TypeError] a
+type CheckPat a = forall r. Members '[State GlobalEnv, Error TypeError, State LocalEnv, Writer CheckExpBox] r => Sem r a
+type CheckExp a = Eff '[State GlobalEnv, Error TypeError, Reader LocalEnv] a
+
+newtype CheckExpBox = CheckExpBox { getCheckExpBox :: forall r. Members '[State GlobalEnv, Error TypeError, Reader LocalEnv] r => Sem r () }
 
 data TypeError
     = UnboundLocalVarError Name
@@ -46,97 +51,95 @@ data TypeError
     | InHead Head TypeError
     deriving (Show)
 
-checkModule :: Monad m => Module -> ExceptT TypeError m GlobalEnv
-checkModule mod = module' mod `evalStateT` mempty
+checkModule :: Module -> Eff '[Error TypeError] GlobalEnv
+checkModule = evalState @GlobalEnv mempty . module'
 
-checkPat :: Members '[PR.Reader GlobalEnv, PE.Error TypeError] r => Text -> Exp -> Pat -> Sem r ()
+checkPat :: Text -> Exp -> Pat -> Eff '[Reader GlobalEnv, Error TypeError] ()
 checkPat ident sig p = do
-    env <- PR.ask
-    case runIdentity . runExceptT $ topPat ident sig p `evalStateT` env of
-        Left err -> PE.throw err
-        Right _ -> pure ()
+    env <- ask
+    void . evalState @GlobalEnv env $ topPat ident sig p
 
-module' :: Monad m => Module -> Check m GlobalEnv
+module' :: Module -> Check GlobalEnv
 module' mod = do
     mapM_ directive mod
     get
 
-directive :: Monad m => Directive -> Check m ()
-directive (RecDec ident ty) = (`runReaderT` mempty) $ do
+directive :: Directive -> Check ()
+directive (RecDec ident ty) = runReader @LocalEnv mempty do
     univ ty
-    recDefs . at ident ?= RecDefDec { _recSignature = ty, _recStatus = RecDeclared }
-directive (IndDec ident ty) = (`runReaderT` mempty) $ do
+    modify $ recDefs . at ident ?~ RecDefDec { _recSignature = ty, _recStatus = RecDeclared }
+directive (IndDec ident ty) = runReader @LocalEnv mempty do
     univFamily ty
-    indDefs . at ident ?= IndDefDec { _indSignature = ty, _indStatus = IndDeclared }
-directive (RecDef ident eqs) = use (recDefs . at ident) >>= \case
-    Nothing -> throwError $ UnboundGlobalVarError ident
+    modify $ indDefs . at ident ?~ IndDefDec { _indSignature = ty, _indStatus = IndDeclared }
+directive (RecDef ident eqs) = (gets . view $ recDefs . at ident) >>= \case
+    Nothing -> throw $ UnboundGlobalVarError ident
     Just dd@(view recStatus -> RecDeclared) -> do
-        genv <- get
+        genv <- get @GlobalEnv
         sig <- expNF $ dd ^. recSignature
         traverse_ (equation ident sig) eqs
-        recDefs . at ident ?= (dd & recStatus .~ RecDefined eqs)
-    _ -> throwError $ AlreadyDefinedError ident
-directive (IndDef fam cons) = use (indDefs . at fam) >>= \case
-    Nothing -> throwError $ UnboundGlobalVarError fam
+        modify $ recDefs . at ident ?~ (dd & recStatus .~ RecDefined eqs)
+    _ -> throw $ AlreadyDefinedError ident
+directive (IndDef fam cons) = (gets . view $ indDefs . at fam) >>= \case
+    Nothing -> throw $ UnboundGlobalVarError fam
     Just dd@(view indStatus -> IndDeclared) -> do
-        genv <- get
+        genv <- get @GlobalEnv
         sig <- expNF $ dd ^. indSignature
         traverse_ (constructor fam) cons
-        indDefs . at fam ?= (dd & indStatus .~ IndDefined cons)
+        modify $ indDefs . at fam ?~ (dd & indStatus .~ IndDefined cons)
 
-equation :: Monad m => Text -> Exp -> Equation -> Check m ()
+equation :: Text -> Exp -> Equation -> Check ()
 equation ident sig eq@(Equation p e) = withError (InEquation ident eq) $ do
     (env, ty) <- topPat ident sig p
-    expAt ty e `runReaderT` env
+    runReader env $ expAt ty e
 {-
-    ((ty, env), forced) <- runWriterT $ pat ident sig p `runStateT` mempty
-    getAp forced `runReaderT` env
-    expAt ty e `runReaderT` env
+    ((ty, env), forced) <- runWriter $ pat ident sig p `runState` mempty
+    getAp forced `runReader` env
+    expAt ty e `runReader` env
     -}
 
-constructor :: Monad m => Text -> Constructor -> Check m ()
+constructor :: Text -> Constructor -> Check ()
 constructor fam (Constructor ident ty) = do
-    univ ty `runReaderT` mempty
-    conTypes . at ident ?= fam
+    runReader @LocalEnv mempty $ univ ty
+    modify $ conTypes . at ident ?~ fam
 
-topPat :: Monad m => Text -> Exp -> Pat -> Check m (LocalEnv, Exp)
+topPat :: Text -> Exp -> Pat -> Eff '[State GlobalEnv, Error TypeError] (LocalEnv, Exp)
 topPat ident sig p = do
-    ((ty, env), forced) <- runWriterT $ pat ident sig p `runStateT` mempty
-    getAp forced `runReaderT` env
+    (forced, (env, ty)) <- runWriter . runState mempty $ pat ident sig p
+    runReader env $ getCheckExpBox forced
     pure (env, ty)
 
-pat :: Monad m => Text -> Exp -> Pat -> CheckPat m Exp
+pat :: Text -> Exp -> Pat -> CheckPat Exp
 pat ident sig p = withError (InPat ident p) $ pat' ident sig p
 
-pat' :: Monad m => Text -> Exp -> Pat -> CheckPat m Exp
+pat' :: Text -> Exp -> Pat -> CheckPat Exp
 pat' ident sig SubjectP = pure sig
 pat' ident sig (AppP p1 p2) =
     pat ident sig p1 >>= \case
         FunE x ty' ty -> do
             subPat ty' p2
-            lift $ expNF (subst1 x (patExp p2) ty)
-        ty -> throwError $ NotFunError ty
+            expNF (subst1 x (patExp p2) ty)
+        ty -> throw $ NotFunError ty
 
-subPat :: Monad m => Exp -> SubPat -> CheckPat m ()
-subPat sig (VarP x) = bindings . at x ?= sig
+subPat :: Exp -> SubPat -> CheckPat ()
+subPat sig (VarP x) = modify $ bindings . at x ?~ sig
 subPat sig (ConP ident ps) =
-    (lift . use $ conTypes . at ident) >>= \case
+    (gets . view $ conTypes . at ident) >>= \case
         Just fam -> do
-            cons <- lift . use $ indDefs . at fam . _Just . indStatus . _IndDefined
+            cons <- gets . view $ indDefs . at fam . _Just . indStatus . _IndDefined
             case [ty | Constructor ident' ty <- cons, ident' == ident] of
-                [] -> throwError $ UnboundGlobalVarError ident
+                [] -> throw $ UnboundGlobalVarError ident
                 [ty] -> do
-                    ty' <- lift $ expNF ty
+                    ty' <- expNF ty
                     conPat sig ty' ps
-subPat sig (ForcedP e) = tell $ Ap (expAt sig e)
+subPat sig (ForcedP e) = tell $ CheckExpBox (expAt sig e)
 
-conPat :: Monad m => Exp -> Exp -> [SubPat] -> CheckPat m ()
+conPat :: Exp -> Exp -> [SubPat] -> CheckPat ()
 conPat sig ty [] = do
-    lenv <- get
-    lift . lift $ unifyExp sig ty `runReaderT` lenv
+    lenv <- get @LocalEnv
+    runReader lenv $ unifyExp sig ty
 conPat sig (FunE x ty' ty) (p : ps) = do
     subPat ty' p
-    tyNF <- lift $ expNF (subst1 x (patExp p) ty)
+    tyNF <- expNF (subst1 x (patExp p) ty)
     conPat sig tyNF ps
 
 patExp :: SubPat -> Exp
@@ -144,15 +147,15 @@ patExp (VarP x) = AppE (Local x) []
 patExp (ConP ident ps) = AppE (Con ident) (map patExp ps)
 patExp (ForcedP e) = e
 
-exp :: Monad m => Exp -> CheckExp m Exp
+exp :: Exp -> CheckExp Exp
 exp e = withError (InExp e) $ exp' e
 
-expAt :: Monad m => Exp -> Exp -> CheckExp m ()
+expAt :: Exp -> Exp -> CheckExp ()
 expAt ty e = withError (InExpAt ty e) do
     ty' <- exp' e
     unifyExp ty' ty
 
-exp' :: Monad m => Exp -> CheckExp m Exp
+exp' :: Exp -> CheckExp Exp
 exp' (AppE h es) = do
     ty0 <- head h
     traverse_ exp es
@@ -163,49 +166,59 @@ exp' (FunE x e1 e2) = do
     local (bindings . at x ?~ e1) $ univ e2
     pure UnivE
 
-head :: Monad m => Head -> CheckExp m Exp
+head :: Head -> CheckExp Exp
 head h = withError (InHead h) $ head' h
 
-head' :: Monad m => Head -> CheckExp m Exp
-head' (Local x) = view (bindings . at x) >>= \case
-    Nothing -> throwError $ UnboundLocalVarError x
+head' :: Head -> CheckExp Exp
+head' (Local x) = (asks . view $ bindings . at x) >>= \case
+    Nothing -> throw $ UnboundLocalVarError x
     Just ty -> expNF ty
-head' (Con ident) = use (conTypes . at ident) >>= \case
-    Nothing -> throwError $ UnboundGlobalVarError ident
+head' (Con ident) = (gets . view $ conTypes . at ident) >>= \case
+    Nothing -> throw $ UnboundGlobalVarError ident
     Just fam -> do
-        cons <- use (indDefs . at fam . traverse . indStatus . _IndDefined)
+        cons <- gets . view $ indDefs . at fam . traverse . indStatus . _IndDefined
         case [ty | Constructor ident' ty <- cons, ident' == ident] of
-            [] -> throwError $ UnboundGlobalVarError ident
+            [] -> throw $ UnboundGlobalVarError ident
             [ty] -> expNF ty
-head' (GlobalRec ident) = preuse (recDefs . at ident . traverse . recSignature) >>= \case
-    Nothing -> throwError $ UnboundGlobalVarError ident
+head' (GlobalRec ident) = (gets . preview $ recDefs . at ident . traverse . recSignature) >>= \case
+    Nothing -> throw $ UnboundGlobalVarError ident
     Just ty -> expNF ty
-head' (GlobalInd ident) = preuse (indDefs . at ident . traverse . indSignature) >>= \case
-    Nothing -> throwError $ UnboundGlobalVarError ident
+head' (GlobalInd ident) = (gets . preview $ indDefs . at ident . traverse . indSignature) >>= \case
+    Nothing -> throw $ UnboundGlobalVarError ident
     Just ty -> expNF ty
 
-univ :: Monad m => Exp -> CheckExp m ()
+univ :: Exp -> CheckExp ()
 univ = expAt UnivE
 
-univFamily :: Monad m => Exp -> CheckExp m ()
+univFamily :: Exp -> CheckExp ()
 univFamily UnivE = pure ()
 univFamily (FunE _ _ ty) = univFamily ty
-univFamily ty = throwError $ NotUnivError ty
+univFamily ty = throw $ NotUnivError ty
 
-appTy :: Monad m => Exp -> [Exp] -> CheckExp m Exp
+appTy :: Exp -> [Exp] -> CheckExp Exp
 appTy ty es = withError (InExpApp ty es) $ appTy' ty es
 
-appTy' :: Monad m => Exp -> [Exp] -> CheckExp m Exp
+appTy' :: Exp -> [Exp] -> CheckExp Exp
 appTy' ty [] = pure ty
 appTy' (FunE x ty1 ty2) (e : es) = do
     expAt ty1 e
-    ty2' <- lift $ expNF (subst (M.singleton x e) ty2)
+    ty2' <- expNF (subst (M.singleton x e) ty2)
     appTy ty2' es
-appTy' ty _ = throwError $ NotFunError ty
+appTy' ty _ = throw $ NotFunError ty
 
-unifyExp :: Monad m => Exp -> Exp -> CheckExp m ()
-unifyExp e1 e2 = view bindings >>= \bs ->
-    unifyWith (const $ ExpUnifyError e1 e2) (PartIso.diagonal $ M.keysSet bs) e1 e2
+expNF :: Exp -> Eff '[State GlobalEnv] Exp
+expNF e = do
+    env <- get @GlobalEnv
+    runReader env $ expNormalForm e
 
-expNF :: MonadState GlobalEnv m => Exp -> m Exp
-expNF e = get >>= flip expNormalForm e
+unifyExp :: Exp -> Exp -> CheckExp ()
+unifyExp e1 e2 = do
+    bs <- asks $ view bindings
+    mapError (\() -> ExpUnifyError e1 e2) . runReader (PartIso.diagonal $ M.keysSet bs) $ unify e1 e2
+    -- unifyWith (const $ ExpUnifyError e1 e2) (PartIso.diagonal $ M.keysSet bs) e1 e2
+
+instance Semigroup CheckExpBox where
+    CheckExpBox a <> CheckExpBox b = CheckExpBox (a >> b)
+
+instance Monoid CheckExpBox where
+    mempty = CheckExpBox (pure ())
