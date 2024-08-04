@@ -12,6 +12,7 @@ import Polysemy.Reader hiding (Local)
 import Polysemy.Writer
 import Polysemy.State
 import Polysemy.Error
+import Polysemy.NonDet
 import Data.Foldable
 import qualified Data.Map as M
 
@@ -27,7 +28,7 @@ import Amber.Typing.Unify
 import Amber.Typing.Normalise
 
 type Check a = Eff '[State GlobalEnv, Error TypeError] a
-type CheckPat a = forall r. Members '[State GlobalEnv, Error TypeError, State LocalEnv, Writer CheckExpBox] r => Sem r a
+type CheckPat a = Eff '[State GlobalEnv, Error TypeError, State LocalEnv, Writer CheckExpBox] a
 type CheckExp a = Eff '[State GlobalEnv, Error TypeError, Reader LocalEnv] a
 
 newtype CheckExpBox = CheckExpBox { getCheckExpBox :: forall r. Members '[State GlobalEnv, Error TypeError, Reader LocalEnv] r => Sem r () }
@@ -49,17 +50,15 @@ data TypeError
     deriving (Show)
 
 checkModule :: Module -> Eff '[Error TypeError] GlobalEnv
-checkModule = evalState @GlobalEnv mempty . module'
+checkModule = execState @GlobalEnv mempty . module'
 
 checkPat :: Text -> Exp -> Pat -> Eff '[Reader GlobalEnv, Error TypeError] ()
 checkPat ident sig p = do
     env <- ask
     void . evalState @GlobalEnv env $ topPat ident sig p
 
-module' :: Module -> Check GlobalEnv
-module' mod = do
-    mapM_ directive mod
-    get
+module' :: Module -> Check ()
+module' = traverse_ directive
 
 directive :: Directive -> Check ()
 directive (RecDec ident ty) = runReader @LocalEnv mempty do
@@ -86,11 +85,6 @@ equation :: Text -> Exp -> Equation -> Check ()
 equation ident sig eq@(Equation p e) = withError (InEquation ident eq) $ do
     (env, ty) <- topPat ident sig p
     runReader env $ expAt ty e
-{-
-    ((ty, env), forced) <- runWriter $ pat ident sig p `runState` mempty
-    getAp forced `runReader` env
-    expAt ty e `runReader` env
-    -}
 
 constructor :: Text -> Constructor -> Check ()
 constructor fam (Constructor ident ty) = do
@@ -213,8 +207,7 @@ expNF e = do
 unifyExp :: Exp -> Exp -> CheckExp ()
 unifyExp e1 e2 = do
     bs <- asks $ view bindings
-    mapError (\() -> ExpUnifyError e1 e2) . runReader (PartIso.diagonal $ M.keysSet bs) $ unify e1 e2
-    -- unifyWith (const $ ExpUnifyError e1 e2) (PartIso.diagonal $ M.keysSet bs) e1 e2
+    nonDetToError (ExpUnifyError e1 e2) . runReader (PartIso.diagonal $ M.keysSet bs) $ unify e1 e2
 
 instance Semigroup CheckExpBox where
     CheckExpBox a <> CheckExpBox b = CheckExpBox (a >> b)

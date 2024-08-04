@@ -11,7 +11,7 @@ import Amber.Shell.Pretty
 import Amber.Syntax.Abstract
 import Amber.Syntax.Parser (ParseError)
 
-data Prec = TopPrec | AppPrec | BotPrec
+data Prec = TopPrec | AmbPrec | AppPrec | BotPrec
     deriving (Show, Eq, Ord, Enum)
 
 instance Pretty Directive where
@@ -92,6 +92,10 @@ instance Pretty Exp where
             echo " : "
         pretty e1
         echo "] "
+        pretty e2
+    pretty (AmbE e1 e2) = parens AmbPrec . withPrec AmbPrec $ do
+        pretty e1
+        echo " | "
         pretty e2
 
 instance Pretty Head where

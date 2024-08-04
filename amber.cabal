@@ -114,14 +114,14 @@ library
     -- other-extensions:
 
     -- Other library packages from which modules are imported.
-    build-depends:      base ^>=4.17,
-                        text ^>=2.0,
-                        containers ^>=0.6,
-                        transformers ^>=0.5,
-                        mtl ^>=2.3.1,
-                        lens ^>=5.2,
-                        parsec ^>=3.1,
-                        polysemy ^>=1.9,
+    build-depends:      base >=4.18,
+                        text >=2.0,
+                        containers >=0.6,
+                        transformers >=0.5,
+                        mtl >=2.3.1,
+                        lens >=5.2,
+                        parsec >=3.1,
+                        polysemy >=1.9,
 
     -- Directories containing source files.
     hs-source-dirs:   src
@@ -144,10 +144,10 @@ executable amber
 
     -- Other library packages from which modules are imported.
     build-depends:
-        base ^>=4.17,
-        text ^>=2.0,
-        mtl ^>=2.3.1,
-        polysemy ^>=1.9,
+        base >=4.18,
+        text >=2.0,
+        mtl >=2.3.1,
+        polysemy >=1.9,
         amber,
 
     -- Directories containing source files.

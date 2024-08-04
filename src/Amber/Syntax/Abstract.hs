@@ -14,6 +14,7 @@ module Amber.Syntax.Abstract (
         appSP1,
     ) where
 
+import Amber.Shell.Panic
 import Amber.Syntax.Name
 
 type Module = [Directive]
@@ -46,6 +47,7 @@ data Exp
     = AppE Head [Exp]
     | UnivE
     | FunE Name Exp Exp
+    | AmbE Exp Exp
     deriving (Show)
 
 data Head
@@ -55,7 +57,7 @@ data Head
     | GlobalInd Text
     deriving (Show)
 
-app :: Exp -> [Exp] -> Exp
+app :: HasCallStack => Exp -> [Exp] -> Exp
 app (AppE h es) es' = AppE h (es ++ es')
 app e [] = e
 app _ _ = undefined
@@ -63,7 +65,7 @@ app _ _ = undefined
 app1 :: Exp -> Exp -> Exp
 app1 e1 e2 = app e1 [e2]
 
-appSP :: SubPat -> [SubPat] -> SubPat
+appSP :: HasCallStack => SubPat -> [SubPat] -> SubPat
 appSP (ConP ident ps) ps' = ConP ident (ps ++ ps')
 appSP _ _ = undefined
 
