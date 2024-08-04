@@ -52,7 +52,7 @@ extra-doc-files:    CHANGELOG.md
 -- extra-source-files:
 
 common warnings
-    ghc-options: -Wall -Wno-name-shadowing
+    ghc-options: -Wall -Wno-name-shadowing -Wno-orphans
 
 library
     -- Import common warning flags.
@@ -62,18 +62,22 @@ library
     exposed-modules:    Amber.Analysis.Occurrence,
                         Amber.Coverage.Check,
                         Amber.Coverage.PatternAlgebra,
+                        Amber.Coverage.Pretty,
+                        Amber.Shell.Pretty,
+                        Amber.Shell.Print,
                         Amber.Syntax.Abstract,
                         Amber.Syntax.Concrete,
                         Amber.Syntax.Equivalence,
                         Amber.Syntax.Free,
                         Amber.Syntax.Name,
                         Amber.Syntax.Parser,
-                        Amber.Syntax.Printer,
+                        Amber.Syntax.Pretty,
                         Amber.Syntax.Resolver,
                         Amber.Syntax.Subst,
                         Amber.Typing.Check,
                         Amber.Typing.Context,
                         Amber.Typing.Normalise,
+                        Amber.Typing.Pretty,
                         Amber.Typing.Unify,
                         Amber.Util.From,
                         Amber.Util.Misc,
@@ -82,6 +86,7 @@ library
                         Amber.Util.Reader,
 
     default-extensions: GeneralizedNewtypeDeriving,
+                        DerivingStrategies,
                         GADTs,
                         MultiParamTypeClasses,
                         FunctionalDependencies,

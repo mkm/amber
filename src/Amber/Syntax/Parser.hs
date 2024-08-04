@@ -1,12 +1,13 @@
 module Amber.Syntax.Parser (
+        ParseError,
         parseExp,
         parseModule,
-        parseFile,
         tokenise,
     ) where
 
 import Prelude hiding (exp)
 import Control.Monad
+import Polysemy.Error hiding (try)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
@@ -15,6 +16,7 @@ import qualified Data.Map as M
 import Text.Parsec hiding (token)
 import qualified Text.Parsec as Parsec
 
+import Amber.Util.Polysemy
 import Amber.Syntax.Concrete
 
 type Tok = Parsec Text (Maybe Int)
@@ -28,12 +30,9 @@ parseExp :: SourceName -> Text -> Either ParseError Exp
 parseExp source =
     tokenise source >=> runParser (exp <* eof) (-1, NewBlock) source
 
-parseModule :: SourceName -> Text -> Either ParseError Module
-parseModule source =
-    tokenise source >=> runParser (many directive <* eof) (-1, WithinBlock) source
-
-parseFile :: SourceName -> IO (Either ParseError Module)
-parseFile source = parseModule source <$> T.readFile source
+parseModule :: SourceName -> Text -> Eff '[Error ParseError] Module
+parseModule source input =
+    fromEither $ tokenise source input >>= runParser (many directive <* eof) (-1, WithinBlock) source
 
 tokenise :: SourceName -> Text -> Either ParseError [Token]
 tokenise = runParser (blanks *> many token <* blanks <* eof) (Just 0)

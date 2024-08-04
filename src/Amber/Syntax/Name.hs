@@ -1,8 +1,10 @@
 {-# LANGUAGE TemplateHaskell, RecursiveDo #-}
 module Amber.Syntax.Name (
+        Text,
         Name,
         NameGen,
         runNameGen,
+        givenName,
         uniqueName,
         canonicalName,
         distinctName,
@@ -18,11 +20,15 @@ import qualified Data.Set as S
 import Data.Map (Map)
 import qualified Data.Map as M
 
+import Amber.Shell.Print
+import Amber.Shell.Pretty
+
 data Name = Name Index Text
     deriving (Eq, Ord)
 
 newtype Index = Index Integer
     deriving (Eq, Ord, Enum)
+    deriving newtype (Show)
 
 instance Semigroup Index where
     Index i <> Index j = Index $ max i j
@@ -35,9 +41,6 @@ data NameGen m a where
 
 makeSem ''NameGen
 
-instance Show Name where
-    show name = T.unpack $ uniqueName name
-
 runNameGen :: Set Name -> Sem (NameGen ': r) a -> Sem r a
 runNameGen names = evalState names . reinterpret \case
     NewName x -> do
@@ -45,6 +48,9 @@ runNameGen names = evalState names . reinterpret \case
         let name = distinctName (canonicalName x) names
         put $ S.insert name names
         pure name
+
+givenName :: Name -> Text
+givenName (Name _ x) = x
 
 uniqueName :: Name -> Text
 uniqueName (Name (Index 0) x) = x
@@ -67,3 +73,11 @@ canonicalName = Name (Index 0)
 
 distinctName :: Foldable t => Name -> t Name -> Name
 distinctName (Name i x) names = Name (foldMap (\(Name j y) -> if y == x then succ j else i) names) x
+
+instance Show Name where
+    show (Name i x) = T.unpack x ++ "_" ++ show i
+
+instance Pretty Name where
+    type PrettyEffects Name r = ()
+
+    pretty = echo . uniqueName

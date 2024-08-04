@@ -14,8 +14,6 @@ module Amber.Syntax.Abstract (
         appSP1,
     ) where
 
-import Data.Text (Text)
-
 import Amber.Syntax.Name
 
 type Module = [Directive]
