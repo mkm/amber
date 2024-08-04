@@ -9,13 +9,14 @@ import Control.Lens
 import Control.Applicative
 import Control.Monad
 import Polysemy
+import Polysemy.Reader
 import Polysemy.NonDet
-import Data.Maybe
 import qualified Data.Set as S
 
-import Amber.Util.Panic
+import Amber.Shell.Panic
 import Amber.Syntax.Abstract
 import Amber.Syntax.Free
+import Amber.Syntax.Pretty
 import Amber.Typing.Context
 
 type PatSystem = [Pat]
@@ -82,10 +83,10 @@ complement env = go
 
         subPat :: SubPat -> E SubPat
         subPat (VarP _) = empty
-        subPat (ConP ident ps) = ConP ident <$> conArgs ps <|> asum [ConP ident' <$> genCons ty | Constructor ident' ty <- cons, ident' /= ident]
-            where
-                tyName = fromMaybe impossible $ env ^. conTypes . at ident
-                cons = env ^. indDefs . at tyName . _Just . indStatus . _IndDefined
+        subPat (ConP ident ps) = do
+            tyName <- maybe (impossible ident) pure $ env ^. conTypes . at ident
+            let cons = env ^. indDefs . at tyName . _Just . indStatus . _IndDefined
+            ConP ident <$> conArgs ps <|> asum [ConP ident' <$> genCons ty | Constructor ident' ty <- cons, ident' /= ident]
         subPat (ForcedP _) = empty
 
         conArgs :: [SubPat] -> E [SubPat]
@@ -99,4 +100,4 @@ complement env = go
         genCons :: Exp -> E [SubPat]
         genCons (FunE _ _ ty) = (:) <$> (VarP <$> newName "?") <*> genCons ty
         genCons (AppE _ _) = pure []
-        genCons _ = impossible
+        genCons e = runReader TopPrec $ impossible e

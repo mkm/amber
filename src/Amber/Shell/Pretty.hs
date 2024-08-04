@@ -1,5 +1,7 @@
 module Amber.Shell.Pretty (
+        module Amber.Shell.Print,
         Pretty(..),
+        Intercalate(..),
         prettyLn,
         errorToPrint,
     ) where
@@ -46,6 +48,16 @@ instance (Pretty a, Pretty b, Pretty c) => Pretty (a, b, c) where
         pretty a
         pretty b
         pretty c
+
+data Intercalate a b = Intercalate a [b]
+
+instance (Pretty a, Pretty b) => Pretty (Intercalate a b) where
+    type PrettyEffects (Intercalate a b) r = (PrettyEffects a r, PrettyEffects b r)
+
+    pretty (Intercalate _ []) = pure ()
+    pretty (Intercalate sep (x : xs)) = do
+        pretty x
+        pretty ((,) sep <$> xs)
 
 prettyLn :: (Pretty a, Member Print r, PrettyEffects a r) => a -> Sem r ()
 prettyLn x = pretty x >> newline

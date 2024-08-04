@@ -11,14 +11,13 @@ import Polysemy.Writer
 import Polysemy.Fail
 import Polysemy.NonDet
 
-import Amber.Util.Panic
 import Amber.Util.Polysemy
+import Amber.Shell.Pretty
+import Amber.Shell.Panic
 import Amber.Syntax.Abstract
 import Amber.Syntax.Subst
+import Amber.Syntax.Pretty
 import Amber.Typing.Context
-
--- type Norm = ReaderT GlobalEnv
--- type Match m = WriterT LocalEnv (ExceptT () (Norm m))
 
 expNormalForm :: Exp -> Eff '[Reader GlobalEnv] Exp
 expNormalForm = expNF
@@ -31,7 +30,7 @@ expNF (AppE h@(GlobalRec x) es) = do
     case matches of
         [] -> pure $ AppE h es'
         [e'] -> expNF e'
-        _ -> todo
+        es -> runReader TopPrec $ todo (Intercalate (" | " :: Text) es)
 expNF (AppE h es) = AppE h <$> traverse expNF es
 expNF e@UnivE = pure e
 expNF (FunE x ty1 ty2) = FunE x <$> expNF ty1 <*> expNF ty2

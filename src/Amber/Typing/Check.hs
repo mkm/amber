@@ -15,11 +15,13 @@ import Polysemy.Error
 import Data.Foldable
 import qualified Data.Map as M
 
-import Amber.Util.Panic
 import Amber.Util.Polysemy
 import qualified Amber.Util.PartIso as PartIso
+import Amber.Shell.Pretty
+import Amber.Shell.Panic
 import Amber.Syntax.Abstract
 import Amber.Syntax.Subst
+import Amber.Syntax.Pretty
 import Amber.Typing.Context
 import Amber.Typing.Unify
 import Amber.Typing.Normalise
@@ -117,7 +119,7 @@ subPat :: Exp -> SubPat -> CheckPat ()
 subPat sig (VarP x) = modify $ bindings . at x ?~ sig
 subPat sig (ConP ident ps) =
     (gets . view $ conTypes . at ident) >>= \case
-        Nothing -> impossible
+        Nothing -> impossible ident
         Just fam -> do
             cons <- gets . view $ indDefs . at fam . _Just . indStatus . _IndDefined
             case [ty | Constructor ident' ty <- cons, ident' == ident] of
@@ -125,7 +127,7 @@ subPat sig (ConP ident ps) =
                 [ty] -> do
                     ty' <- expNF ty
                     conPat sig ty' ps
-                _ -> impossible
+                tys -> runReader BotPrec $ impossible (Intercalate ' ' tys)
 subPat sig (ForcedP e) = tell $ CheckExpBox (expAt sig e)
 
 conPat :: Exp -> Exp -> [SubPat] -> CheckPat ()
@@ -136,7 +138,7 @@ conPat sig (FunE x ty' ty) (p : ps) = do
     subPat ty' p
     tyNF <- expNF (subst1 x (patExp p) ty)
     conPat sig tyNF ps
-conPat _ _ _ = impossible
+conPat _ ty ps = runReader BotPrec $ impossible (ty, ' ', Intercalate ' ' ps)
 
 patExp :: SubPat -> Exp
 patExp (VarP x) = AppE (Local x) []
@@ -176,7 +178,7 @@ head' (Con ident) = (gets . view $ conTypes . at ident) >>= \case
         case [ty | Constructor ident' ty <- cons, ident' == ident] of
             [] -> throw $ UnboundGlobalVarError ident
             [ty] -> expNF ty
-            _ -> impossible
+            tys -> runReader BotPrec $ impossible (Intercalate ' ' tys)
 head' (GlobalRec ident) = (gets . preview $ recDefs . at ident . traverse . recSignature) >>= \case
     Nothing -> throw $ UnboundGlobalVarError ident
     Just ty -> expNF ty
