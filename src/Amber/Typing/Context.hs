@@ -21,7 +21,6 @@ module Amber.Typing.Context (
     ) where
 
 import Control.Lens
-import Data.Text (Text)
 import Data.Map (Map)
 
 import Amber.Syntax.Abstract

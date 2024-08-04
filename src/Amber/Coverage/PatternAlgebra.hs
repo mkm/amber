@@ -10,11 +10,10 @@ import Control.Applicative
 import Control.Monad
 import Polysemy
 import Polysemy.NonDet
-import Polysemy.NonDet
-import Polysemy.State
-import Data.Set (Set)
+import Data.Maybe
 import qualified Data.Set as S
 
+import Amber.Util.Panic
 import Amber.Syntax.Abstract
 import Amber.Syntax.Free
 import Amber.Typing.Context
@@ -79,13 +78,13 @@ complement env = go
             do
                 p1' <- genPat p1
                 p2' <- subPat p2
-                pure $ AppP p1 p2'
+                pure $ AppP p1' p2'
 
         subPat :: SubPat -> E SubPat
         subPat (VarP _) = empty
         subPat (ConP ident ps) = ConP ident <$> conArgs ps <|> asum [ConP ident' <$> genCons ty | Constructor ident' ty <- cons, ident' /= ident]
             where
-                Just tyName = env ^. conTypes . at ident
+                tyName = fromMaybe impossible $ env ^. conTypes . at ident
                 cons = env ^. indDefs . at tyName . _Just . indStatus . _IndDefined
         subPat (ForcedP _) = empty
 
@@ -95,27 +94,9 @@ complement env = go
 
         genPat :: Pat -> E Pat
         genPat SubjectP = pure SubjectP
-        genPat (AppP p1 p2) = AppP <$> genPat p1 <*> (VarP <$> newName "?")
+        genPat (AppP p1 _) = AppP <$> genPat p1 <*> (VarP <$> newName "?")
 
         genCons :: Exp -> E [SubPat]
         genCons (FunE _ _ ty) = (:) <$> (VarP <$> newName "?") <*> genCons ty
         genCons (AppE _ _) = pure []
-
-{-
-        pat :: Pat -> PatSystem
-        pat SubjectP = []
-        pat (AppP p1 p2) =
-            [AppP p1' (VarP (newName "?" (patFree p1'))) | p1' <- pat p1] ++
-            [AppP (patSkel (subPatFree p2') p1) p2' | p2' <- subPat p2]
-
-        subPat :: SubPat -> [SubPat]
-        subPat (VarP _) = []
-        subPat (ConP ident ps) = undefined
-        subPat (ForcedP _) = []
-
-        patSkel :: Set Name -> Pat -> Pat
-        patSkel _ SubjectP = SubjectP
-        patSkel names (AppP p1 p2) = AppP (patSkel (S.insert x names) p1) (VarP x)
-            where
-                x = newName "?" names
-                -}
+        genCons _ = impossible

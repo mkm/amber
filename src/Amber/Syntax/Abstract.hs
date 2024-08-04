@@ -58,12 +58,14 @@ data Head
 app :: Exp -> [Exp] -> Exp
 app (AppE h es) es' = AppE h (es ++ es')
 app e [] = e
+app _ _ = undefined
 
 app1 :: Exp -> Exp -> Exp
 app1 e1 e2 = app e1 [e2]
 
 appSP :: SubPat -> [SubPat] -> SubPat
 appSP (ConP ident ps) ps' = ConP ident (ps ++ ps')
+appSP _ _ = undefined
 
 appSP1 :: SubPat -> SubPat -> SubPat
 appSP1 p1 p2 = appSP p1 [p2]

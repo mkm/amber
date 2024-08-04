@@ -9,9 +9,7 @@ import Polysemy
 import Polysemy.Reader
 import Polysemy.Error
 import Data.Maybe
-import Data.Either
 import Data.Foldable
-import Data.Text (Text)
 
 import Amber.Syntax.Abstract
 import Amber.Typing.Context

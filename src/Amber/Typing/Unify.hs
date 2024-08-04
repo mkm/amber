@@ -4,7 +4,6 @@ module Amber.Typing.Unify (
 
 import Polysemy.Reader hiding (Local)
 import Polysemy.Error
-import Data.Text (Text)
 
 import Amber.Util.Polysemy
 import Amber.Util.PartIso (PartIso)

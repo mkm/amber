@@ -6,7 +6,6 @@ module Amber.Util.PartIso (
         diagonal,
     ) where
 
-import Data.Maybe
 import Data.Set (Set)
 import Data.Map (Map)
 import qualified Data.Map as M

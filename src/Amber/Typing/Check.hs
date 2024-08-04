@@ -13,9 +13,9 @@ import Polysemy.Writer
 import Polysemy.State
 import Polysemy.Error
 import Data.Foldable
-import Data.Text (Text)
 import qualified Data.Map as M
 
+import Amber.Util.Panic
 import Amber.Util.Polysemy
 import qualified Amber.Util.PartIso as PartIso
 import Amber.Syntax.Abstract
@@ -24,11 +24,6 @@ import Amber.Typing.Context
 import Amber.Typing.Unify
 import Amber.Typing.Normalise
 
-{-
-type Check m = StateT GlobalEnv (ExceptT TypeError m)
-type CheckPat m = StateT LocalEnv (WriterT (Ap (CheckExp m) ()) (Check m))
-type CheckExp m = ReaderT LocalEnv (Check m)
--}
 type Check a = Eff '[State GlobalEnv, Error TypeError] a
 type CheckPat a = forall r. Members '[State GlobalEnv, Error TypeError, State LocalEnv, Writer CheckExpBox] r => Sem r a
 type CheckExp a = Eff '[State GlobalEnv, Error TypeError, Reader LocalEnv] a
@@ -74,7 +69,6 @@ directive (IndDec ident ty) = runReader @LocalEnv mempty do
 directive (RecDef ident eqs) = (gets . view $ recDefs . at ident) >>= \case
     Nothing -> throw $ UnboundGlobalVarError ident
     Just dd@(view recStatus -> RecDeclared) -> do
-        genv <- get @GlobalEnv
         sig <- expNF $ dd ^. recSignature
         traverse_ (equation ident sig) eqs
         modify $ recDefs . at ident ?~ (dd & recStatus .~ RecDefined eqs)
@@ -82,10 +76,9 @@ directive (RecDef ident eqs) = (gets . view $ recDefs . at ident) >>= \case
 directive (IndDef fam cons) = (gets . view $ indDefs . at fam) >>= \case
     Nothing -> throw $ UnboundGlobalVarError fam
     Just dd@(view indStatus -> IndDeclared) -> do
-        genv <- get @GlobalEnv
-        sig <- expNF $ dd ^. indSignature
         traverse_ (constructor fam) cons
         modify $ indDefs . at fam ?~ (dd & indStatus .~ IndDefined cons)
+    Just _ -> throw $ AlreadyDefinedError fam
 
 equation :: Text -> Exp -> Equation -> Check ()
 equation ident sig eq@(Equation p e) = withError (InEquation ident eq) $ do
@@ -112,7 +105,7 @@ pat :: Text -> Exp -> Pat -> CheckPat Exp
 pat ident sig p = withError (InPat ident p) $ pat' ident sig p
 
 pat' :: Text -> Exp -> Pat -> CheckPat Exp
-pat' ident sig SubjectP = pure sig
+pat' _ sig SubjectP = pure sig
 pat' ident sig (AppP p1 p2) =
     pat ident sig p1 >>= \case
         FunE x ty' ty -> do
@@ -124,6 +117,7 @@ subPat :: Exp -> SubPat -> CheckPat ()
 subPat sig (VarP x) = modify $ bindings . at x ?~ sig
 subPat sig (ConP ident ps) =
     (gets . view $ conTypes . at ident) >>= \case
+        Nothing -> impossible
         Just fam -> do
             cons <- gets . view $ indDefs . at fam . _Just . indStatus . _IndDefined
             case [ty | Constructor ident' ty <- cons, ident' == ident] of
@@ -131,6 +125,7 @@ subPat sig (ConP ident ps) =
                 [ty] -> do
                     ty' <- expNF ty
                     conPat sig ty' ps
+                _ -> impossible
 subPat sig (ForcedP e) = tell $ CheckExpBox (expAt sig e)
 
 conPat :: Exp -> Exp -> [SubPat] -> CheckPat ()
@@ -141,6 +136,7 @@ conPat sig (FunE x ty' ty) (p : ps) = do
     subPat ty' p
     tyNF <- expNF (subst1 x (patExp p) ty)
     conPat sig tyNF ps
+conPat _ _ _ = impossible
 
 patExp :: SubPat -> Exp
 patExp (VarP x) = AppE (Local x) []
@@ -180,6 +176,7 @@ head' (Con ident) = (gets . view $ conTypes . at ident) >>= \case
         case [ty | Constructor ident' ty <- cons, ident' == ident] of
             [] -> throw $ UnboundGlobalVarError ident
             [ty] -> expNF ty
+            _ -> impossible
 head' (GlobalRec ident) = (gets . preview $ recDefs . at ident . traverse . recSignature) >>= \case
     Nothing -> throw $ UnboundGlobalVarError ident
     Just ty -> expNF ty

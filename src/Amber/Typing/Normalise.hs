@@ -6,12 +6,12 @@ import Prelude hiding (exp)
 import Control.Lens
 import Control.Applicative
 import Control.Monad
-import Polysemy
 import Polysemy.Reader
 import Polysemy.Writer
 import Polysemy.Fail
 import Polysemy.NonDet
 
+import Amber.Util.Panic
 import Amber.Util.Polysemy
 import Amber.Syntax.Abstract
 import Amber.Syntax.Subst
@@ -31,6 +31,7 @@ expNF (AppE h@(GlobalRec x) es) = do
     case matches of
         [] -> pure $ AppE h es'
         [e'] -> expNF e'
+        _ -> todo
 expNF (AppE h es) = AppE h <$> traverse expNF es
 expNF e@UnivE = pure e
 expNF (FunE x ty1 ty2) = FunE x <$> expNF ty1 <*> expNF ty2

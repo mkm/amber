@@ -13,12 +13,9 @@ module Amber.Syntax.Name (
 
 import Polysemy
 import Polysemy.State
-import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Set (Set)
 import qualified Data.Set as S
-import Data.Map (Map)
-import qualified Data.Map as M
 
 import Amber.Shell.Print
 import Amber.Shell.Pretty
@@ -67,6 +64,7 @@ subscript '6' = '₆'
 subscript '7' = '₇'
 subscript '8' = '₈'
 subscript '9' = '₉'
+subscript _ = undefined
 
 canonicalName :: Text -> Name
 canonicalName = Name (Index 0)

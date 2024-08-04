@@ -10,7 +10,6 @@ import Data.Kind
 import Data.Foldable
 import qualified Data.Text as T
 
-import Amber.Util.Polysemy
 import Amber.Shell.Print
 
 class Pretty a where

@@ -10,7 +10,6 @@ import Polysemy.Reader
 import Polysemy.State
 import Data.Foldable
 import Data.Maybe
-import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Map (Map)
 import qualified Data.Map as M
@@ -96,6 +95,7 @@ emittingCurrentDef mod =
 pat :: C.Pat -> PatRes (Text, A.Pat)
 pat (C.VarP subject) = pure $ pure (subject, A.SubjectP)
 pat C.WildP = error "pattern subject is _"
+pat (C.ForcedP _) = error "pattern subject is a forced expression"
 pat (C.AppP p1 p2) = do
     p1' <- pat p1
     p2' <- subPat p2
@@ -173,6 +173,7 @@ globalInd ident = (asks . view $ indDecs . at ident) <&> fmap \_ -> A.AppE (A.Gl
 target :: A.Exp -> Text
 target (A.FunE _ _ ty) = target ty
 target (A.AppE (A.GlobalInd ident) _) = ident
+target _ = undefined
 
 patName :: Text -> Eff '[State Names] Name
 patName x = distinctName (canonicalName x) <$> gets @(Map Text Name) M.elems

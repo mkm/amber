@@ -59,8 +59,7 @@ library
     import:           warnings
 
     -- Modules exported by the library.
-    exposed-modules:    Amber.Analysis.Occurrence,
-                        Amber.Coverage.Check,
+    exposed-modules:    Amber.Coverage.Check,
                         Amber.Coverage.PatternAlgebra,
                         Amber.Coverage.Pretty,
                         Amber.Shell.Pretty,
@@ -81,6 +80,7 @@ library
                         Amber.Typing.Unify,
                         Amber.Util.From,
                         Amber.Util.Misc,
+                        Amber.Util.Panic,
                         Amber.Util.PartIso,
                         Amber.Util.Polysemy,
                         Amber.Util.Reader,
